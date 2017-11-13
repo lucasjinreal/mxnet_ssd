@@ -46,6 +46,7 @@ def parse_args():
                         help='which network to use')
     parser.add_argument('--images', dest='images', type=str, default='./data/demo/',
                         help='run demo with images, use comma to seperate multiple images')
+    parser.add_argument('--video', type=bool, default=False, help='Bool to set video or not.')
     parser.add_argument('--dir', dest='dir', nargs='?',
                         help='demo image directory, optional', type=str)
     parser.add_argument('--ext', dest='extension', help='image extension, optional',
@@ -125,5 +126,8 @@ if __name__ == '__main__':
                             (args.mean_r, args.mean_g, args.mean_b),
                             ctx, len(class_names), args.nms_thresh, args.force_nms)
     # run detection
-    detector.detect_and_visualize(image_list, args.dir, args.extension,
-                                  class_names, args.thresh, args.show_timer)
+    if args.video:
+        detector.detect_on_video('./data/video/road_demo.mp4', classes=class_names, thresh=args.thresh)
+    else:
+        detector.detect_and_visualize(image_list, args.dir, args.extension,
+                                      class_names, args.thresh, args.show_timer)

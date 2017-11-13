@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/mxnet-ssd.iml" filepath="$PROJECT_DIR$/.idea/mxnet-ssd.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/mxnet_ssd.iml" filepath="$PROJECT_DIR$/.idea/mxnet_ssd.iml" />
     </modules>
   </component>
 </project>

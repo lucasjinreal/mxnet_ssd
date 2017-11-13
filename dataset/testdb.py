@@ -28,7 +28,6 @@ class TestDB(Imdb):
         self.root_dir = root_dir if root_dir else None
         self.extension = extension if extension else None
 
-
     def image_path_from_index(self, index):
         """
         given image index, return full path

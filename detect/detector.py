@@ -3,11 +3,12 @@ import mxnet as mx
 import numpy as np
 from timeit import default_timer as timer
 from dataset.testdb import TestDB
-from dataset.iterator import DetIter
+from dataset.iterator import DetIter, VideoIter
 import matplotlib.pyplot as plt
 import random
 import cv2
 import colorsys
+from collections import namedtuple
 
 
 class Detector(object):
@@ -148,7 +149,63 @@ class Detector(object):
                                    fontsize=12, color='white')
         plt.show()
 
-    def visualize_det_cv2(self, img, detections, classes=None, thresh=0.6):
+    def detect_and_visualize(self, im_list, root_dir=None, extension=None,
+                             classes=[], thresh=0.6, show_timer=False):
+        """
+        wrapper for im_detect and visualize_detection
+
+        Parameters:
+        ----------
+        im_list : list of str or str
+            image path or list of image paths
+        root_dir : str or None
+            directory of input images, optional if image path already
+            has full directory information
+        extension : str or None
+            image extension, eg. ".jpg", optional
+
+        Returns:
+        ----------
+
+        """
+
+        dets = self.im_detect(im_list, root_dir, extension, show_timer=show_timer)
+        if not isinstance(im_list, list):
+            im_list = [im_list]
+        assert len(dets) == len(im_list)
+        for k, det in enumerate(dets):
+            img = cv2.imread(im_list[k], cv2.CAP_MODE_RGB)
+            img = self.visualize_det_cv2(img, det, classes, thresh=thresh)
+            cv2.imwrite('./results/result_{}.jpg'.format(k), img)
+
+    def detect_on_video(self, video_f, classes, thresh):
+        print('# opening video...')
+        cap = cv2.VideoCapture(video_f)
+        # cap.set(3, 384)
+        # cap.set(4, 1248)
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+
+        video_iter = VideoIter(video_cap=cap, data_shape=self.data_shape, mean_pixels=self.mean_pixels)
+
+        i = 0
+        for pred, _, _ in self.mod.iter_predict(video_iter):
+            i += 1
+            detections_one_image = pred[0].asnumpy()
+            print(detections_one_image)
+            print(detections_one_image.shape)
+            detections_one_image = np.squeeze(detections_one_image, 0)
+            print(detections_one_image.shape)
+            current_frame = video_iter.current_frame_image
+            print('# current image:', video_iter.current_frame_image.shape)
+
+            img = self.visualize_det_cv2(current_frame, detections_one_image,
+                                         classes, thresh=thresh, is_video=True)
+            cv2.imshow('image', img)
+            cv2.waitKey(1)
+            cv2.imwrite('./results/video/frame_%05d.jpg' % i, img)
+            print('# image saved.')
+
+    def visualize_det_cv2(self, img, detections, classes=None, thresh=0.6, is_video=False):
         """
         visualize detection on image using cv2, this is the standard way to visualize detections
         :param img:
@@ -156,6 +213,7 @@ class Detector(object):
                 each row is one object
         :param classes:
         :param thresh:
+        :param is_video
         :return:
         """
         assert classes, 'from visualize_det_cv2, classes must be provided, each class in a list with' \
@@ -190,38 +248,10 @@ class Detector(object):
                                   (text_org[0] + ret_val[0] + 5, text_org[1] - ret_val[1] + 5),
                                   unique_color, -1)
                     cv2.putText(img, text_label, text_org, cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1)
-        cv2.imshow('image', img)
-        cv2.waitKey(0)
+        if not is_video:
+            cv2.imshow('image', img)
+            cv2.waitKey(0)
         return img
-
-    def detect_and_visualize(self, im_list, root_dir=None, extension=None,
-                             classes=[], thresh=0.6, show_timer=False):
-        """
-        wrapper for im_detect and visualize_detection
-
-        Parameters:
-        ----------
-        im_list : list of str or str
-            image path or list of image paths
-        root_dir : str or None
-            directory of input images, optional if image path already
-            has full directory information
-        extension : str or None
-            image extension, eg. ".jpg", optional
-
-        Returns:
-        ----------
-
-        """
-
-        dets = self.im_detect(im_list, root_dir, extension, show_timer=show_timer)
-        if not isinstance(im_list, list):
-            im_list = [im_list]
-        assert len(dets) == len(im_list)
-        for k, det in enumerate(dets):
-            img = cv2.imread(im_list[k], cv2.CAP_MODE_RGB)
-            img = self.visualize_det_cv2(img, det, classes, thresh=thresh)
-            cv2.imwrite('./results/result_{}.jpg'.format(k), img)
 
     @staticmethod
     def _create_unique_color_float(tag, hue_step=0.41):

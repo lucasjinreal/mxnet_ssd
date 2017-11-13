@@ -3,6 +3,85 @@ import numpy as np
 import cv2
 from tools.rand_sampler import RandSampler
 
+
+class VideoIter(mx.io.DataIter):
+
+    def __init__(self, video_cap, data_shape, mean_pixels, batch_size=1):
+        super(VideoIter, self).__init__()
+
+        self.video_cap = video_cap
+        self.batch_size = batch_size
+        self.data = None
+
+        if isinstance(data_shape, int):
+            data_shape = (data_shape, data_shape)
+        self._data_shape = data_shape
+
+        self._mean_pixels = mx.nd.array(mean_pixels).reshape((3, 1, 1))
+
+        self.current_batch = 0
+        self.current_frame_image = None
+
+        # we just have 1 batch so the pad is zero
+        self.pad = 0
+
+    def _provide_data(self):
+        return [(k, v.shape) for k, v in self._data.items()]
+
+    @property
+    def provide_data(self):
+        return self._provide_data
+
+    def getpad(self):
+        return 0
+
+    def reset(self):
+        self.current_batch = 0
+
+    def iter_next(self):
+        return self._get_batch()
+
+    def next(self):
+        if self.iter_next():
+            data_batch = mx.io.DataBatch(data=list(self._data.values()),
+                                         label=[], pad=self.getpad(), index=self.getindex())
+            self.current_batch += self.batch_size
+            print('===== fucking data_batch: ', data_batch)
+            return data_batch
+        else:
+            raise StopIteration
+
+    def pre_process_data(self, frame_image):
+        """
+        solve only for inference in video and camera
+        :param frame_image:
+        :return:
+        """
+        interp_methods = [cv2.INTER_LINEAR]
+        interp_method = interp_methods[int(np.random.uniform(0, 1) * len(interp_methods))]
+        data = mx.img.imresize(frame_image, self._data_shape[1], self._data_shape[0], interp_method)
+        data = mx.nd.transpose(data, (2, 0, 1))
+        data = data.astype('float32')
+        data = data - self._mean_pixels
+        return data
+
+    def _get_batch(self):
+        # get the next frame
+        if self.video_cap.isOpened():
+            ret, frame = self.video_cap.read()
+            if ret:
+                batch_data = mx.nd.zeros((self.batch_size, 3, self._data_shape[0], self._data_shape[1]))
+                for i in range(self.batch_size):
+                    frame_img = frame[:, :, (0, 2, 1)]
+                    self.current_frame_image = frame
+                    batch_data[i] = self.pre_process_data(mx.nd.array(frame_img))
+                self._data = {'data': batch_data}
+                self._label = {'label': None}
+            return True
+        else:
+            return False
+
+
 class DetRecordIter(mx.io.DataIter):
     """
     The new detection iterator wrapper for mx.io.ImageDetRecordIter which is
@@ -40,23 +119,24 @@ class DetRecordIter(mx.io.DataIter):
     ----------
 
     """
+
     def __init__(self, path_imgrec, batch_size, data_shape, path_imglist="",
                  label_width=-1, label_pad_width=-1, label_pad_value=-1,
-                 resize_mode='force',  mean_pixels=[123.68, 116.779, 103.939],
+                 resize_mode='force', mean_pixels=[123.68, 116.779, 103.939],
                  **kwargs):
         super(DetRecordIter, self).__init__()
         self.rec = mx.io.ImageDetRecordIter(
-            path_imgrec     = path_imgrec,
-            path_imglist    = path_imglist,
-            label_width     = label_width,
-            label_pad_width = label_pad_width,
-            label_pad_value = label_pad_value,
-            batch_size      = batch_size,
-            data_shape      = data_shape,
-            mean_r          = mean_pixels[0],
-            mean_g          = mean_pixels[1],
-            mean_b          = mean_pixels[2],
-            resize_mode     = resize_mode,
+            path_imgrec=path_imgrec,
+            path_imglist=path_imglist,
+            label_width=label_width,
+            label_pad_width=label_pad_width,
+            label_pad_value=label_pad_value,
+            batch_size=batch_size,
+            data_shape=data_shape,
+            mean_r=mean_pixels[0],
+            mean_g=mean_pixels[1],
+            mean_b=mean_pixels[2],
+            resize_mode=resize_mode,
             **kwargs)
 
         self.provide_label = None
@@ -106,6 +186,7 @@ class DetRecordIter(mx.io.DataIter):
         self._batch.label = [mx.nd.array(label)]
         return True
 
+
 class DetIter(mx.io.DataIter):
     """
     Detection Iterator, which will feed data and label to network
@@ -137,10 +218,11 @@ class DetIter(mx.io.DataIter):
         whether in training phase, default True, if False, labels might
         be ignored
     """
-    def __init__(self, imdb, batch_size, data_shape, \
-                 mean_pixels=[128, 128, 128], rand_samplers=[], \
-                 rand_mirror=False, shuffle=False, rand_seed=None, \
-                 is_train=True, max_crop_trial=50):
+
+    def __init__(self, imdb, batch_size, data_shape,
+                 mean_pixels=[128, 128, 128], rand_samplers=[],
+                 rand_mirror=False, shuffle=False, rand_seed=None,
+                 is_train=True, max_crop_trial=50, is_video=False):
         super(DetIter, self).__init__()
 
         self._imdb = imdb
@@ -148,7 +230,7 @@ class DetIter(mx.io.DataIter):
         if isinstance(data_shape, int):
             data_shape = (data_shape, data_shape)
         self._data_shape = data_shape
-        self._mean_pixels = mx.nd.array(mean_pixels).reshape((3,1,1))
+        self._mean_pixels = mx.nd.array(mean_pixels).reshape((3, 1, 1))
         if not rand_samplers:
             self._rand_samplers = []
         else:
@@ -157,10 +239,11 @@ class DetIter(mx.io.DataIter):
             assert isinstance(rand_samplers[0], RandSampler), "Invalid rand sampler"
             self._rand_samplers = rand_samplers
         self.is_train = is_train
+        self.is_video = is_video
         self._rand_mirror = rand_mirror
         self._shuffle = shuffle
         if rand_seed:
-            np.random.seed(rand_seed) # fix random seed
+            np.random.seed(rand_seed)  # fix random seed
         self._max_crop_trial = max_crop_trial
 
         self._current = 0
@@ -194,8 +277,8 @@ class DetIter(mx.io.DataIter):
         if self.iter_next():
             self._get_batch()
             data_batch = mx.io.DataBatch(data=list(self._data.values()),
-                                   label=list(self._label.values()),
-                                   pad=self.getpad(), index=self.getindex())
+                                         label=list(self._label.values()),
+                                         pad=self.getpad(), index=self.getindex())
             self._current += self.batch_size
             return data_batch
         else:
@@ -259,7 +342,7 @@ class DetIter(mx.io.DataIter):
                 xmax = int(crop[2] * width)
                 ymax = int(crop[3] * height)
                 if xmin >= 0 and ymin >= 0 and xmax <= width and ymax <= height:
-                    data = mx.img.fixed_crop(data, xmin, ymin, xmax-xmin, ymax-ymin)
+                    data = mx.img.fixed_crop(data, xmin, ymin, xmax - xmin, ymax - ymin)
                 else:
                     # padding mode
                     new_width = xmax - xmin
@@ -268,7 +351,7 @@ class DetIter(mx.io.DataIter):
                     offset_y = 0 - ymin
                     data_bak = data
                     data = mx.nd.full((new_height, new_width, 3), 128, dtype='uint8')
-                    data[offset_y:offset_y+height, offset_x:offset_x + width, :] = data_bak
+                    data[offset_y:offset_y + height, offset_x:offset_x + width, :] = data_bak
                 label = rand_crops[index][1]
         if self.is_train:
             interp_methods = [cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_AREA, \
@@ -284,7 +367,7 @@ class DetIter(mx.io.DataIter):
                 tmp = 1.0 - label[valid_mask, 1]
                 label[valid_mask, 1] = 1.0 - label[valid_mask, 3]
                 label[valid_mask, 3] = tmp
-        data = mx.nd.transpose(data, (2,0,1))
+        data = mx.nd.transpose(data, (2, 0, 1))
         data = data.astype('float32')
         data = data - self._mean_pixels
         return data, label
